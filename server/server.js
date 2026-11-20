@@ -84,8 +84,18 @@ const server = http.createServer((req, res) => {
     });
   }
 
-  // --- the vulnerable surface: decode an untrusted Brotli body
-  if (req.method === 'POST' && req.url === '/decode') {
+  // --- the vulnerable surface: decode an untrusted Brotli body.
+  // Handled for POST /decode (dashboard) and, like real Express/body-parser
+  // middleware, for ANY POST that carries a Content-Encoding header. This is
+  // the exposure shape that remote scanners fingerprint.
+  const enc = String(req.headers['content-encoding'] || '').trim().toLowerCase();
+  if (req.method === 'POST' && (req.url === '/decode' || enc !== '')) {
+    // Middleware contract: an encoding we don't understand is rejected with
+    // 415 (Unsupported Media Type) *before* any body is buffered. Only `br`
+    // (and no-op `identity`) reach the Brotli decoder.
+    if (enc !== '' && enc !== 'br' && enc !== 'identity') {
+      return send(res, 415, { ok: false, error: 'UNSUPPORTED_MEDIA_TYPE', encoding: enc });
+    }
     const chunks = [];
     let total = 0;
     req.on('data', (c) => {
@@ -95,6 +105,10 @@ const server = http.createServer((req, res) => {
     });
     req.on('end', () => {
       const input = Buffer.concat(chunks);
+      if (enc === 'identity') {
+        // declared no-op encoding: pass through, nothing reaches the decoder
+        return send(res, 200, { ok: true, inputBytes: input.length, decoded: false });
+      }
       const t0 = process.hrtime.bigint();
       try {
         // >>> This single call is the exploitable sink. On an unpatched
