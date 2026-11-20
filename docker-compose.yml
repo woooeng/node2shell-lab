@@ -1,0 +1,45 @@
+# CVE-2026-111497 test lab
+# vuln  = Node 22.14.0 (< 22.23.4 fix)  -> VULNERABLE
+# patched = Node 22.23.5 (>= 22.23.4)   -> PATCHED
+# gateway = dashboard + proxy on :8080
+services:
+  vuln:
+    image: node:22.14.0-bookworm-slim
+    container_name: cve111497-vuln
+    working_dir: /app
+    volumes: [ "./server:/app:ro" ]
+    command: ["node", "/app/server.js"]
+    environment: { ROLE: vulnerable, PORT: "3000" }
+    ports: [ "3001:3000" ]
+    restart: unless-stopped
+    networks: [ lab ]
+
+  patched:
+    image: node:22-bookworm-slim      # resolves to 22.23.5 at pull time
+    container_name: cve111497-patched
+    working_dir: /app
+    volumes: [ "./server:/app:ro" ]
+    command: ["node", "/app/server.js"]
+    environment: { ROLE: patched, PORT: "3000" }
+    ports: [ "3002:3000" ]
+    restart: unless-stopped
+    networks: [ lab ]
+
+  gateway:
+    image: node:22-bookworm-slim
+    container_name: cve111497-gateway
+    working_dir: /app
+    volumes: [ "./web:/app:ro" ]
+    command: ["node", "/app/gateway.js"]
+    environment:
+      PORT: "8080"
+      VULN_URL: "http://vuln:3000"
+      PATCHED_URL: "http://patched:3000"
+    ports: [ "8080:8080" ]
+    depends_on: [ vuln, patched ]
+    restart: unless-stopped
+    networks: [ lab ]
+
+networks:
+  lab:
+    driver: bridge
